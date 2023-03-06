@@ -1,0 +1,98 @@
+/**:
+  ros__parameters:
+
+    # Topics
+    pointCloudTopic: "/points_raw"               # Point cloud data, 原始点云话题
+    imuTopic: "/imu_raw"                     # IMU data, 原始IMU数据话题
+    imuOdomTopic: "/lio_sam/imu/odometry"        # IMU pre-preintegration odometry, same frequency as IMU; 
+                                                 # IMU里程计, 在imuPreintegration中发布，与IMU频率相同（最高频率）
+    lidarOdomTopic: "/lio_sam/mapping/odometry"  # 雷达里程计，在mapOptimization中发布
+    gpsTopic: "gps/odometry"                     # GPS odometry topic from navsat, see module_navsat.launch file. 
+                                                 # gps原始数据经过robot_localization包处理后发布出来的gps数据，暂未使用
+
+    # Services
+    saveMapSrv: "/lio_sam/save_map"               # save map service address
+
+    # Frames
+    imuFrame: "imu_link"                            # IMU数据坐标系，如果IMU和激光雷达坐标系硬件对齐，可以认为IMU、Lidar、Chassis坐标系相同
+    lidarFrame: "lidar_link"                        # 激光雷达坐标系，点云数据坐标系，由激光雷达发布的数据指定。与lidarFrame相同，但是不同雷达有不同的名称
+    baseLinkFrame: "base_link"                      # 车辆底盘坐标系
+    odomFrame: "odom"                               # 里程计坐标系，在SLAM中一般也是世界坐标系，通常是车辆的起始坐标系
+
+    # GPS Settings
+    useImuHeadingInitialization: false           # if using GPS data, set to "true"
+    useGpsElevation: false                       # if GPS elevation is bad, set to "false"
+    gpsCovThreshold: 2.0                         # m^2, threshold for using GPS data
+    poseCovThreshold: 25.0                       # m^2, threshold for using GPS data
+
+    # Export settings
+    savePCD: false                               # 是否实时保存点云地图（包含轨迹等）
+    savePCDDirectory: "/Downloads/LOAM/"         # in your home folder, starts and ends with "/". Warning: the code deletes "LOAM" folder then recreates it. See "mapOptimization" for implementation
+
+    # Sensor Settings
+    sensor: velodyne                             # lidar sensor type, either 'velodyne' or 'ouster'
+    N_SCAN: 16                                   # number of lidar channel (i.e., 16, 32, 64, 128)
+    Horizon_SCAN: 1800                           # lidar horizontal resolution (Velodyne:1800, Ouster:512,1024,2048)
+    downsampleRate: 1                            # default: 1. Downsample your data if too many points. i.e., 16 = 64 / 4, 16 = 16 / 1
+    lidarMinRange: 1.0                           # default: 1.0, minimum lidar range to be used
+    lidarMaxRange: 1000.0                        # default: 1000.0, maximum lidar range to be used
+
+    # IMU Settings
+    imuAccNoise: 3.9939570888238808e-03          # IMU加速度噪声协方差，可以用Allen方差标定；这里三个轴设为相同的方差
+    imuGyrNoise: 1.5636343949698187e-03          # IMU角速度噪声协方差，可以用Allen方差标定；这里三个轴设为相同的方差
+    imuAccBiasN: 6.4356659353532566e-05          # IMU加速度偏差，三轴统一
+    imuGyrBiasN: 3.5640318696367613e-05          # IMU角速度偏差，三轴统一
+    imuGravity: 9.80511                          # 重力加速度值
+    imuRPYWeight: 0.01                           # 算法中使用IMU的roll、pitch角对激光里程计的结果加权融合
+
+    extrinsicTrans:  [ 0.0,  0.0,  0.0 ]         # IMU向量到雷达坐标系的平移：P_{lidar} = T * P_{imu}
+    extrinsicRot:    [ -1.0,  0.0,  0.0,          # IMU加速度向量到雷达坐标系的旋转
+                       0.0, 1.0,  0.0,
+                       0.0,  0.0, -1.0 ]
+    extrinsicRPY: [ 0.0,  1.0,  0.0,             # IMU角速度向量到雷达坐标系的旋转
+                    -1.0, 0.0,  0.0,
+                    0.0,  0.0, 1.0 ]
+
+    # LOAM feature threshold
+    edgeThreshold: 1.0                           # 边缘特征点提取阈值
+    surfThreshold: 0.1                           # 平面特征点提取阈值
+    edgeFeatureMinValidNum: 10                   # 边缘特征点数量阈值
+    surfFeatureMinValidNum: 100                  # 平面特征点数量阈值
+
+    # voxel filter paprams                       # 各个降采样器的voxel大小
+    odometrySurfLeafSize: 0.4                    # default: 0.4 - outdoor, 0.2 - indoor
+    mappingCornerLeafSize: 0.2                   # default: 0.2 - outdoor, 0.1 - indoor
+    mappingSurfLeafSize: 0.4                     # default: 0.4 - outdoor, 0.2 - indoor
+
+    # robot motion constraint
+    z_tollerance: 1000.0                          # meters, 限制z轴平移的大小
+    rotation_tollerance: 1000.0                   # radians, 限制roll、pitch角的大小
+
+    # CPU Params
+    numberOfCores: 4                              # number of cores for mapping optimization
+    mappingProcessInterval: 0.15                  # seconds, regulate mapping frequency，关键帧处理时间间隔，雷达里程计频率不会大于1/0.15
+
+    # Surrounding map
+    surroundingkeyframeAddingDistThreshold: 1.0   # meters, regulate keyframe adding threshold.  当前帧需要与上一帧距离大于1米或者角度大于0.2度才有可能采纳为关键帧
+    surroundingkeyframeAddingAngleThreshold: 0.2  # radians, regulate keyframe adding threshold. 当前帧需要与上一帧距离大于1米或者角度大于0.2度才有可能采纳为关键帧
+    surroundingKeyframeDensity: 2.0               # meters, downsample surrounding keyframe poses. 构建局部地图时对采用的关键帧数量做降采样
+    surroundingKeyframeSearchRadius: 50.0         # meters, within n meters scan-to-map optimization. 构建局部地图时关键帧的检索半径
+
+    # Loop closure
+    loopClosureEnableFlag: true
+    loopClosureFrequency: 1.0                     # Hz, regulate loop closure constraint add frequency. 回环检测独立线程的执行频率
+    surroundingKeyframeSize: 50                   # submap size (when loop closure enabled)
+                                                  # 回环检测构建局部地图的最大关键帧数量
+    historyKeyframeSearchRadius: 15.0             # meters, key frame that is within n meters from current pose will be considerd for loop closure
+                                                  # 执行回环检测时关键帧的检索半径
+    historyKeyframeSearchTimeDiff: 30.0           # seconds, key frame that is n seconds older will be considered for loop closure
+                                                  # 执行回环检测时关键帧的检索时间范围
+    historyKeyframeSearchNum: 25                  # number of hostory key frames will be fused into a submap for loop closure
+                                                  # 执行回环检测时融合局部地图时对目标关键帧执行+-25帧的关键帧融合
+    historyKeyframeFitnessScore: 0.3              # icp threshold, the smaller the better alignment
+                                                  # 执行回环检测时使用ICP做点云匹配，阈值大于0.3认为匹配失败，不采纳当前回环检测
+
+    # Visualization
+    globalMapVisualizationSearchRadius: 1000.0    # meters, global map visualization radius
+    globalMapVisualizationPoseDensity: 10.0       # meters, global map visualization keyframe density
+    globalMapVisualizationLeafSize: 1.0           # meters, global map visualization cloud density
