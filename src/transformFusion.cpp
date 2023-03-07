@@ -49,6 +49,7 @@ public:
     // 时时更新的雷达里程计变量
     Eigen::Isometry3d lidarOdomAffine;
 
+    // tf2的相关组建
     std::shared_ptr<tf2_ros::Buffer> tfBuffer;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tfBroadcaster;
     std::shared_ptr<tf2_ros::TransformListener> tfListener;
@@ -60,26 +61,25 @@ public:
         tfBuffer = std::make_shared<tf2_ros::Buffer>(get_clock());
         tfListener = std::make_shared<tf2_ros::TransformListener>(*tfBuffer);
 
+        // 订阅低频的雷达里程计信息
         callbackGroupImuOdometry = create_callback_group(
             rclcpp::CallbackGroupType::MutuallyExclusive);
-        callbackGroupLaserOdometry = create_callback_group(
-            rclcpp::CallbackGroupType::MutuallyExclusive);
-
         auto imuOdomOpt = rclcpp::SubscriptionOptions();
         imuOdomOpt.callback_group = callbackGroupImuOdometry;
-        auto laserOdomOpt = rclcpp::SubscriptionOptions();
-        laserOdomOpt.callback_group = callbackGroupLaserOdometry;
-
-        // 订阅低频的雷达里程计信息
-        subLaserOdometry = create_subscription<nav_msgs::msg::Odometry>(
-            lidarOdomTopic, qos,
-            std::bind(&TransformFusion::lidarOdometryHandler, this, std::placeholders::_1),
-            laserOdomOpt);
-        // 订阅高频的IMU里程计信息
         subImuOdometry = create_subscription<nav_msgs::msg::Odometry>(
             imuOdomTopic, qos_imu,
             std::bind(&TransformFusion::imuOdometryHandler, this, std::placeholders::_1),
             imuOdomOpt);
+        
+        // 订阅高频的IMU里程计信息
+        callbackGroupLaserOdometry = create_callback_group(
+            rclcpp::CallbackGroupType::MutuallyExclusive);
+        auto laserOdomOpt = rclcpp::SubscriptionOptions();
+        laserOdomOpt.callback_group = callbackGroupLaserOdometry;
+        subLaserOdometry = create_subscription<nav_msgs::msg::Odometry>(
+            lidarOdomTopic, qos,
+            std::bind(&TransformFusion::lidarOdometryHandler, this, std::placeholders::_1),
+            laserOdomOpt);
 
         // 发布两帧雷达里程计之间的IMU里程计信息
         pubImuPath = create_publisher<nav_msgs::msg::Path>("lio_sam/imu/path", qos);

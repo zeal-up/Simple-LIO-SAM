@@ -15,7 +15,7 @@
 
     # Frames
     imuFrame: "imu_link"                            # IMU数据坐标系，如果IMU和激光雷达坐标系硬件对齐，可以认为IMU、Lidar、Chassis坐标系相同
-    lidarFrame: "lidar_link"                        # 激光雷达坐标系，点云数据坐标系，由激光雷达发布的数据指定。与lidarFrame相同，但是不同雷达有不同的名称
+    lidarFrame: "velodyne"                        # 激光雷达坐标系，点云数据坐标系，由激光雷达发布的数据指定。与lidarFrame相同，但是不同雷达有不同的名称
     baseLinkFrame: "base_link"                      # 车辆底盘坐标系
     odomFrame: "odom"                               # 里程计坐标系，在SLAM中一般也是世界坐标系，通常是车辆的起始坐标系
 

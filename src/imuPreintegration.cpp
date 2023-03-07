@@ -255,6 +255,8 @@ public:
         // 这里加锁主要是防止imuQueOpt队列被imuHandler线程修改
         std::lock_guard<std::mutex> lock(mtx);
 
+        RCLCPP_DEBUG(get_logger(), "Receive lidar odom in %f", stamp2Sec(odomMsg->header.stamp));
+
         // 当前雷达里程计时间
         double currentLidarOdomTime = stamp2Sec(odomMsg->header.stamp);
 
@@ -316,6 +318,12 @@ public:
             // 加入新的因子，并使用优化器对因子图做一次优化
             // 可以多次调用update()对当前的因子图进行多次更新
             optimizer.update(graphFactors, graphValues);
+
+            // 打印因子图和优化器
+            // graphFactors.print("GTSAM GraphFactors in systemInitialized:\n");
+            // graphValues.print("GTSAM GraphValues in systemInitialized:\n");
+            // optimizer.print("GTSAM optimizer in systemInitialized:\n");
+
             // 清空因子图。因子已经已经被记录到优化器中。这是在gtsam的官方example的递增式优化流程中的用法
             // example:gtsam/examples/VisualSAM2Example.cpp
             graphFactors.resize(0);
@@ -366,16 +374,17 @@ public:
             key = 1;
         }
 
-
         // 将imuQueOpt队列中，所有早于当前雷达里程计的数据进行积分，获取最新的IMU bias
         while (!imuQueOpt.empty())
         {
             // pop and integrate imu data that is between two optimizations
             sensor_msgs::msg::Imu *thisImu = &imuQueOpt.front();
             double imuTime = stamp2Sec(thisImu->header.stamp);
+            RCLCPP_DEBUG(get_logger(), "lidar_time = %f, imu_time = %f", currentLidarOdomTime, imuTime);
             if (imuTime < currentLidarOdomTime - sync_t)
             {
                 double dt = (lastImuT_opt < 0) ? (1.0 / 500.0) : (imuTime - lastImuT_opt);
+                
                 if(dt<=0){ 
                     imuQueOpt.pop_front();
                     continue;
@@ -430,9 +439,15 @@ public:
         graphValues.insert(X(key), propState_.pose());
         graphValues.insert(V(key), propState_.v());
         graphValues.insert(B(key), prevBias_);
+        // 打印因子图
+        // graphFactors.print("GTSAM GraphFactors in update:\n");
+        // graphValues.print("GTSAM GraphValues in update:\n");
         // 更新一次优化器
         optimizer.update(graphFactors, graphValues);
         optimizer.update();
+        // 打印更新后的优化器状态
+        // optimizer.print("GTSAM optimizer in update:");
+
         // 清空因子图和值（已经被保存进优化器里了）
         graphFactors.resize(0);
         graphValues.clear();
