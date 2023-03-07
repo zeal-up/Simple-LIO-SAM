@@ -5,6 +5,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+SET(CMAKE_CXX_FLAGS_RELEASE "$ENV{CXXFLAGS} -O3 -Wall")
 SET(CMAKE_CXX_FLAGS_DEBUG "$ENV{CXXFLAGS} -O0 -Wall -g -ggdb -Wno-unused-parameter")  
 
 # find dependencies
@@ -28,6 +29,8 @@ find_package(PCL REQUIRED)
 find_package(GTSAM REQUIRED)
 find_package(Eigen REQUIRED)
 find_package(pcl_msgs REQUIRED)
+find_package(OpenMP REQUIRED)
+
 
 include_directories(
   include
@@ -46,13 +49,11 @@ target_link_libraries(${PROJECT_NAME}_featureExtraction ${cpp_typesupport_target
 
 add_executable(${PROJECT_NAME}_imuPreintegration src/imuPreintegration.cpp)
 ament_target_dependencies(${PROJECT_NAME}_imuPreintegration rclcpp rclpy std_msgs sensor_msgs geometry_msgs nav_msgs pcl_msgs visualization_msgs pcl_msgs tf2 tf2_ros tf2_eigen tf2_sensor_msgs tf2_geometry_msgs OpenCV PCL GTSAM Eigen pcl_msgs)
-target_link_libraries(${PROJECT_NAME}_imuPreintegration gtsam)
-target_link_libraries(${PROJECT_NAME}_imuPreintegration ${cpp_typesupport_target})
+target_link_libraries(${PROJECT_NAME}_imuPreintegration gtsam ${cpp_typesupport_target})
 
 add_executable(${PROJECT_NAME}_mapOptimization src/mapOptimization.cpp)
 ament_target_dependencies(${PROJECT_NAME}_mapOptimization rclcpp rclpy std_msgs sensor_msgs geometry_msgs nav_msgs pcl_msgs visualization_msgs pcl_msgs tf2 tf2_ros tf2_eigen tf2_sensor_msgs tf2_geometry_msgs OpenCV PCL GTSAM Eigen pcl_msgs)
-target_link_libraries(${PROJECT_NAME}_mapOptimization gtsam)
-target_link_libraries(${PROJECT_NAME}_mapOptimization ${cpp_typesupport_target})
+target_link_libraries(${PROJECT_NAME}_mapOptimization gtsam ${cpp_typesupport_target} OpenMP::OpenMP_CXX)
 
 add_executable(${PROJECT_NAME}_transformFusion src/transformFusion.cpp)
 ament_target_dependencies(${PROJECT_NAME}_transformFusion rclcpp rclpy std_msgs sensor_msgs geometry_msgs nav_msgs pcl_msgs visualization_msgs pcl_msgs tf2 tf2_ros tf2_eigen tf2_sensor_msgs tf2_geometry_msgs OpenCV PCL)
