@@ -1531,6 +1531,8 @@ public:
         transformTobeMapped[1] = constraintTransformation(transformTobeMapped[1], rotation_tollerance);
         transformTobeMapped[5] = constraintTransformation(transformTobeMapped[5], z_tollerance);
 
+        // 这里就已经记录了incrementalOdometryAffineBack，后续被用来计算odometry_incremental
+        // 也就是说，incremental的激光里程计没有使用到因子图优化的结果，因此更加光滑，没有跳变，可以给IMU预积分模块使用
         incrementalOdometryAffineBack = trans2Affine3f(transformTobeMapped);
     }
 
@@ -1903,7 +1905,7 @@ public:
     */
     void publishOdometry()
     {
-        // Publish odometry for ROS (global)
+        // 发布全局最优的激光里程计结果（mapping/odometry)
         nav_msgs::msg::Odometry laserOdometryROS;
         laserOdometryROS.header.stamp = timeLaserInfoStamp;
         laserOdometryROS.header.frame_id = odomFrame;
@@ -1916,9 +1918,21 @@ public:
         geometry_msgs::msg::Quaternion quat_msg;
         tf2::convert(quat_tf, quat_msg);
         laserOdometryROS.pose.pose.orientation = quat_msg;
-        // pubLaserOdometryGlobal->publish(laserOdometryROS);
+        if (isDegenerate)
+            laserOdometryROS.pose.covariance[0] = 1;
+        else
+            laserOdometryROS.pose.covariance[0] = 0;
+        pubLaserOdometryGlobal->publish(laserOdometryROS);
 
-        // Publish odometry for ROS (incremental)
+        // 发布光滑的激光里程计结果（mapping/odometry_incremental）
+        /**
+         * mapping/odometry_incremental里程计是只使用了点云匹配而没有使用因子图优化的里程计
+         * liosam作者TixiaoShan在github回复中（https://github.com/TixiaoShan/LIO-SAM/issues/92）提到了这一点
+         * 下面这部分计算incremental里程计中，incrementalOdometryAffineFront是上一帧经过因子图优化后的结果，
+         * incrementalOdometryAffineBack是在点云匹配之后、因子图优化之前的缓存结果。
+         * 因此，odometry_incremental是间接使用了因子图优化，相比odometry应该有一定延迟和平滑。但是根据实验的结果
+         * 来看，似乎差别不大，但是为了体现作者的工作和思考，下面这部分代码依旧保留。
+        */
         static bool lastIncreOdomPubFlag = false;
         static nav_msgs::msg::Odometry laserOdomIncremental; // incremental odometry msg
         static Eigen::Affine3f increOdomAffine; // incremental odometry in affine
@@ -1928,6 +1942,10 @@ public:
             laserOdomIncremental = laserOdometryROS;
             increOdomAffine = trans2Affine3f(transformTobeMapped);
         } else {
+            /**
+             * incrementalOdometryAffineBack在执行完scan2MapOptimization后就被记录下来
+             * 也就是说，incremental的激光里程计没有使用到因子图优化的结果，因此更加光滑，没有跳变，可以给IMU预积分模块使用
+            */
             Eigen::Affine3f affineIncre = incrementalOdometryAffineFront.inverse() * incrementalOdometryAffineBack;
             increOdomAffine = increOdomAffine * affineIncre;
             float x, y, z, roll, pitch, yaw;
@@ -1970,7 +1988,7 @@ public:
             else
                 laserOdomIncremental.pose.covariance[0] = 0;
         }
-        pubLaserOdometryGlobal->publish(laserOdomIncremental);
+        // pubLaserOdometryGlobal->publish(laserOdomIncremental);
     }
 
     /**
