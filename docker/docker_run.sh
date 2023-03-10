@@ -2,7 +2,7 @@
 
 declare script_dir=$(cd $(dirname $0); pwd -P)
 
-declare ARGS=$(getopt -o h,c: --long help,code -n "$0" -- "$@")
+declare ARGS=$(getopt -o h,c:d: --long help,code:,data: -n "$0" -- "$@")
 # echo ARGS=[$ARGS]
 eval set -- "${ARGS}"
 # echo formatted parameters=[$@]
@@ -12,6 +12,7 @@ declare docker_image_name="spl_lio_sam"
 declare docker_image="${docker_image_name}:${docker_image_tag}"
 declare container_name="spl_lio_sam"
 declare code_dir=""
+declare data_dir=""
 
 function Help() {
 cat << EOF
@@ -21,7 +22,8 @@ Usage:
     docker_run.sh [-h|--help] [-c|--code]
 
     -h|--help           Show help message
-    -c|--code           Code directory to mount into container
+    -c|--code           Code directory mount into container
+    -d|--data           Data directory mount into container
 
 EOF
 }
@@ -34,6 +36,8 @@ if [[ $1 ]]; then
                 Help; exit 0; ;;
             -c|--code):
                 code_dir=$2; shift 2; ;;
+            -d|--data):
+                data_dir=$2; shift 2; ;;
             --)
                 shift; break; ;;
             *)
@@ -59,6 +63,9 @@ fi
 declare volumes=""
 if [[ ${code_dir} ]]; then
     volumes="-v ${code_dir}:/home/splsam/codes"
+fi
+if [[ ${data_dir} ]]; then
+    volumes="${volumes} -v ${data_dir}:/home/splsam/data"
 fi
 
 docker run -it \
