@@ -17,6 +17,7 @@ RUN apt-get update \
     && apt install -y ros-humble-xacro \
     && apt install -y git \
     && apt install -y wget curl \
+    && apt install -y vim \
     && apt install -y software-properties-common \
     && add-apt-repository ppa:borglab/gtsam-develop \
     && apt update \
@@ -37,8 +38,13 @@ RUN useradd --create-home --no-log-init --shell /bin/bash splsam \
 && chown root:root /usr/local/bin/fixuid \
 && chmod 4755 /usr/local/bin/fixuid \
 && mkdir -p /etc/fixuid \
-&& printf "user: $USER\ngroup: $GROUP\n" > /etc/fixuid/config.yml
+&& printf "user: $USER\ngroup: $GROUP\n" > /etc/fixuid/config.yml \
+&& mkdir -p /home/splsam/ros_ws \
+&& sudo chown splsam:splsam /home/splsam/ros_ws \
+&& echo 'source /opt/ros/humble/setup.bash' >> /home/splsam/.bashrc
 
+# fix liosam 4.1.0
+COPY ./source/concepts.h /usr/include/gtsam/base/
 
 USER splsam:splsam
 WORKDIR /home/splsam
