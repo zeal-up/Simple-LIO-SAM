@@ -8,7 +8,7 @@ eval set -- "${ARGS}"
 # echo formatted parameters=[$@]
 
 declare docker_image_tag="v1.0"
-declare docker_image_name="spl_lio_sam"
+declare docker_image_name="zeallin/spl_lio_sam"
 declare docker_image="${docker_image_name}:${docker_image_tag}"
 declare container_name="spl_lio_sam"
 declare code_dir=""
