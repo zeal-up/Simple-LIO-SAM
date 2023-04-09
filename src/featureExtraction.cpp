@@ -72,7 +72,7 @@ public:
     // 特征提取标志，1表示遮挡、平行，或者已经进行了特征提取的点，0表示未进行特征提取
     // 这是一个N_SCAN*Horizon_SCAN长的数组cloudNeighborPicked = new int[N_SCAN*Horizon_SCAN];
     int *cloudNeighborPicked;
-    // 1表示角点，-1表示平面点，同样是一个N_SCAN*Horizon_SCAN长的数组
+    // 1表示角点，-1表示平面点，0表示没有被选择为特征点，同样是一个N_SCAN*Horizon_SCAN长的数组
     int *cloudLabel;
 
     FeatureExtraction(const rclcpp::NodeOptions & options) :
