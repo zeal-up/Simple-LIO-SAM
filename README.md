@@ -1,11 +1,5 @@
----
-title: Simple-LIO-SAM
-date: 2023-03-14 19:49:06
-tags: [liosam,slam]
-categories: [技能,SLAM,LIOSAM]
----
-## 博客
-* :heart_decoration: [Blog](https://zeal-up.github.io/categories/)
+## 文章解读
+* :heart_decoration: [Blog](https://zeal-up.github.io/2023/03/13/lio_sam/intro/)
 * :six_pointed_star: [知乎](https://www.zhihu.com/column/c_1619085291536433152)
 
 ## 本项目目的及特点介绍
