@@ -731,7 +731,7 @@ public:
         *copy_cloudKeyPoses6D = *cloudKeyPoses6D;
         mtx.unlock();
 
-        // 3. 将最后一帧关键帧作为当前帧，如果当前帧已经在回环对应关系中，则返回（已经处理过这一帧了）。回环关系用一个全局map缓存
+        // 3. 将最后一帧关键帧作为当前帧，如果当前帧已经在回环对应关系中，则返回（已经处理过这一帧了）。如果找到的回环对应帧相差时间过短也返回false。回环关系用一个全局map缓存
         // 4. 对关键帧3D位姿构建kd树，并用当前帧位置从kd树寻找距离最近的几帧，挑选时间间隔最远的那一帧作为匹配帧
         int loopKeyCur;
         int loopKeyPre;
@@ -794,7 +794,7 @@ public:
 
     /**
      * @brief 根据位置关系寻找当前帧与对应帧的索引
-     * 1. 将最后一帧关键帧作为当前帧，如果当前帧已经在回环对应关系中，则返回（已经处理过这一帧了）。回环关系用一个全局map缓存
+     * 1. 将最后一帧关键帧作为当前帧，如果当前帧已经在回环对应关系中，则返回（已经处理过这一帧了）。如果找到的回环对应帧相差时间过短也返回false。回环关系用一个全局map缓存
      * 2. 对关键帧3D位姿构建kd树，并用当前帧位置从kd树寻找距离最近的几帧，挑选时间间隔最远的那一帧作为匹配帧
      * 
      * @param latestID 传出参数，找到的当前帧索引，实际就是用最后一帧关键帧
@@ -805,17 +805,19 @@ public:
         int loopKeyCur = copy_cloudKeyPoses3D->size() - 1;
         int loopKeyPre = -1;
 
-        // check loop constraint added before
+        // 确认最后一帧关键帧没有被加入过回环关系中
         auto it = loopIndexContainer.find(loopKeyCur);
         if (it != loopIndexContainer.end())
             return false;
 
-        // find the closest history key frame
+        // 将关键帧的3D位置构建kdtree，并检索空间位置相近的关键帧
         std::vector<int> pointSearchIndLoop;
         std::vector<float> pointSearchSqDisLoop;
         kdtreeHistoryKeyPoses->setInputCloud(copy_cloudKeyPoses3D);
+        // 寻找空间距离相近的关键帧
         kdtreeHistoryKeyPoses->radiusSearch(copy_cloudKeyPoses3D->back(), historyKeyframeSearchRadius, pointSearchIndLoop, pointSearchSqDisLoop, 0);
         
+        // 确保空间距离相近的帧是较久前采集的，排除是前面几个关键帧
         for (int i = 0; i < (int)pointSearchIndLoop.size(); ++i)
         {
             int id = pointSearchIndLoop[i];
@@ -826,6 +828,7 @@ public:
             }
         }
 
+        // 如果没有找到位置关系、时间关系都符合要求的关键帧，则返回false
         if (loopKeyPre == -1 || loopKeyCur == loopKeyPre)
             return false;
 
@@ -1148,28 +1151,43 @@ public:
     }
 
     /**
-     * 角点点云匹配优化函数，需要进一步研究
+     * @brief 计算边缘点点集中每一个点到局部地图中匹配到的直线的距离和法向量;
     */
     void cornerOptimization()
     {
+        // 将transformTobeMapped存储到transPointAssociateToMap转换矩阵，
+        // 方便后面用旋转平移关系对选中的点转换到地图坐标系
         updatePointAssociateToMap();
 
+        // omp指令集进行并行计算，打开后在某些电脑上似乎有比较奇怪的表现
         #pragma omp parallel for num_threads(numberOfCores)
         for (int i = 0; i < laserCloudCornerCurDSNum; i++)
         {
+            // pointOri是雷达坐标系下的边缘点；pointSel是转换到地图坐标系下的点
+            // coeff存储的是经过距离加权后的点到平面向量
             PointType pointOri, pointSel, coeff;
             std::vector<int> pointSearchInd;
             std::vector<float> pointSearchSqDis;
 
             pointOri = laserCloudCornerCurDS->points[i];
+            // 将雷达坐标系下的点pointOri转换到地图坐标系pointSel
             pointAssociateToMap(&pointOri, &pointSel);
+            // 从局部地图（已经提前设置好kdtree）中找到最近的5个点
+            // pointSel为检索点
+            // pointSearchInd存储检索结果的5个点在原始点云中的索引
+            // pointSearchSqDis存储检索出的5个点与检索点的距离的平方
             kdtreeCornerFromMap->nearestKSearch(pointSel, 5, pointSearchInd, pointSearchSqDis);
 
+            // matA1是检索出的5个点的协方差矩阵
             cv::Mat matA1(3, 3, CV_32F, cv::Scalar::all(0));
+            // matD1是协方差矩阵的特征值
             cv::Mat matD1(1, 3, CV_32F, cv::Scalar::all(0));
+            // matV1是协方差矩阵的特征向量
             cv::Mat matV1(3, 3, CV_32F, cv::Scalar::all(0));
-                    
+            
+            // 如果找到的第5个点（距离最大）的点也小与1米，认为检索结果有效，否则跳过当前的pointOri
             if (pointSearchSqDis[4] < 1.0) {
+                // cx,cy,cz是检索出的5个点的中心坐标
                 float cx = 0, cy = 0, cz = 0;
                 for (int j = 0; j < 5; j++) {
                     cx += laserCloudCornerFromMapDS->points[pointSearchInd[j]].x;
@@ -1178,6 +1196,7 @@ public:
                 }
                 cx /= 5; cy /= 5;  cz /= 5;
 
+                // 协方差矩阵是对称矩阵
                 float a11 = 0, a12 = 0, a13 = 0, a22 = 0, a23 = 0, a33 = 0;
                 for (int j = 0; j < 5; j++) {
                     float ax = laserCloudCornerFromMapDS->points[pointSearchInd[j]].x - cx;
@@ -1190,17 +1209,24 @@ public:
                 }
                 a11 /= 5; a12 /= 5; a13 /= 5; a22 /= 5; a23 /= 5; a33 /= 5;
 
+                // 存储协方差的值到matA1
                 matA1.at<float>(0, 0) = a11; matA1.at<float>(0, 1) = a12; matA1.at<float>(0, 2) = a13;
                 matA1.at<float>(1, 0) = a12; matA1.at<float>(1, 1) = a22; matA1.at<float>(1, 2) = a23;
                 matA1.at<float>(2, 0) = a13; matA1.at<float>(2, 1) = a23; matA1.at<float>(2, 2) = a33;
 
+                // 对协方差矩阵做特征值分解，最大特征值对应的特征向量是这5个点的主方向
                 cv::eigen(matA1, matD1, matV1);
 
+                // 如果最大的特征值要远大于第二个特征值，则认为则5个点能够构成一条直线
+                // 类似PCA主成分分析的原理，数据协方差的最大特征值对应的特征向量为主方向
                 if (matD1.at<float>(0, 0) > 3 * matD1.at<float>(0, 1)) {
-
+                    // 以下部分是在计算当前点pointSel到检索出的直线的距离和方向，如果距离够近，则认为匹配成功，否则认为匹配失败
+                    // x0,y0,z0是直线外一点
                     float x0 = pointSel.x;
                     float y0 = pointSel.y;
                     float z0 = pointSel.z;
+                    // matV1的第一行就是5个点形成的直线的方向，cx,cy,cz是5个点的中心点
+                    // 因此，x1,y1,z1和x2,y2,z2是经过中心点的直线上的另外两个点，两点之间的距离是0.2米
                     float x1 = cx + 0.1 * matV1.at<float>(0, 0);
                     float y1 = cy + 0.1 * matV1.at<float>(0, 1);
                     float z1 = cz + 0.1 * matV1.at<float>(0, 2);
@@ -1208,12 +1234,20 @@ public:
                     float y2 = cy - 0.1 * matV1.at<float>(0, 1);
                     float z2 = cz - 0.1 * matV1.at<float>(0, 2);
 
+                    // 这边是在求[(x0-x1),(y0-y1),(z0-z1)]与[(x0-x2),(y0-y2),(z0-z2)]叉乘得到的向量的模长
+                    // 这个模长是由0.2*V1[0]和点[x0,y0,z0]构成的平行四边形的面积
+                    // 垂直于0,1,2三点构成的平面的向量[XXX,YYY,ZZZ] = [(y0-y1)(z0-z2)-(y0-y2)(z0-z1),-(x0-x1)(z0-z2)+(x0-x2)(z0-z1),(x0-x1)(y0-y2)-(x0-x2)(y0-y1)]
                     float a012 = sqrt(((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1)) * ((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1)) 
                                     + ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1)) * ((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1)) 
                                     + ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1)) * ((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1)));
 
+                    // l12表示的是0.2*(||V1[0]||)
+                    // 点x1,y1,z1到点x2,y2,z2的距离
                     float l12 = sqrt((x1 - x2)*(x1 - x2) + (y1 - y2)*(y1 - y2) + (z1 - z2)*(z1 - z2));
 
+                    // 求叉乘结果[la',lb',lc']=[(x1-x2),(y1-y2),(z1-z2)]x[XXX,YYY,ZZZ]
+                    // [la,lb,lc]=[la',lb',lc']/a012/l12
+                    // LLL=[la,lb,lc]是0.2*V1[0]这条高上的单位法向量。||LLL||=1；
                     float la = ((y1 - y2)*((x0 - x1)*(y0 - y2) - (x0 - x2)*(y0 - y1)) 
                               + (z1 - z2)*((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1))) / a012 / l12;
 
@@ -1223,15 +1257,20 @@ public:
                     float lc = -((x1 - x2)*((x0 - x1)*(z0 - z2) - (x0 - x2)*(z0 - z1)) 
                                + (y1 - y2)*((y0 - y1)*(z0 - z2) - (y0 - y2)*(z0 - z1))) / a012 / l12;
 
+                    // ld2就是点pointSel(x0,y0,z0)到直线的距离
                     float ld2 = a012 / l12;
 
+                    // 如果点pointSel刚好在直线上，则ld2=0,s=1；
+                    // 点到直线的距离越远，s越小，则赋予的比重越低
                     float s = 1 - 0.9 * fabs(ld2);
 
+                    // 使用系数对法向量加权，实际上相当于对导数（雅克比矩阵加权了）
                     coeff.x = s * la;
                     coeff.y = s * lb;
                     coeff.z = s * lc;
                     coeff.intensity = s * ld2;
 
+                    // 经验阈值，判断点到直线的距离是否够近，足够近才采纳为优化目标点
                     if (s > 0.1) {
                         laserCloudOriCornerVec[i] = pointOri;
                         coeffSelCornerVec[i] = coeff;
@@ -1243,7 +1282,7 @@ public:
     }
 
     /**
-     * 角点点云匹配优化函数，需要进一步研究
+     * @brief 计算平面点点集中每一个点到局部地图中匹配到的平面的距离和法向量
     */
     void surfOptimization()
     {
@@ -1257,9 +1296,13 @@ public:
             std::vector<float> pointSearchSqDis;
 
             pointOri = laserCloudSurfCurDS->points[i];
-            pointAssociateToMap(&pointOri, &pointSel); 
+            pointAssociateToMap(&pointOri, &pointSel);
+            // 与边缘点找直线一样，从局部地图的平面点集中找到与pointSel距离最近的5个点
             kdtreeSurfFromMap->nearestKSearch(pointSel, 5, pointSearchInd, pointSearchSqDis);
 
+            // 下面的过程要求解Ax+By+Cz+1=0的平面方程
+            // 由于有5个点，因此是求解超定方程
+            // 假设5个点都在平面上，则matA0是系数矩阵，matB0是等号右边的值（都是-1）；matX0是求出来的A，B，C
             Eigen::Matrix<float, 5, 3> matA0;
             Eigen::Matrix<float, 5, 1> matB0;
             Eigen::Vector3f matX0;
@@ -1275,6 +1318,7 @@ public:
                     matA0(j, 2) = laserCloudSurfFromMapDS->points[pointSearchInd[j]].z;
                 }
 
+                // 这里是求解matA0XmatX0 = matB0方程
                 matX0 = matA0.colPivHouseholderQr().solve(matB0);
 
                 float pa = matX0(0, 0);
@@ -1282,9 +1326,14 @@ public:
                 float pc = matX0(2, 0);
                 float pd = 1;
 
+                // （pa,pb,pc)是平面的法向量，这里是对法向量规一化，变成单位法向量
                 float ps = sqrt(pa * pa + pb * pb + pc * pc);
                 pa /= ps; pb /= ps; pc /= ps; pd /= ps;
 
+                // 下面是判定检索出来的5个点是否能够构成一个合格的法向量
+                // 点到平面（Ax+By+Cz+D=0)的距离为 |Ax+By+Cz+D|/\sqrt(A^2+B^2+C^2)
+                // 由于这里法向量已经归一化成为单位法向量，因此这里|Ax+By+Cz+D|就等于点到平面的距离
+                // 这里只有当5个点到拟合的平面距离都小于0.2米才认为拟合的平面合格，否则跳过这个点
                 bool planeValid = true;
                 for (int j = 0; j < 5; j++) {
                     if (fabs(pa * laserCloudSurfFromMapDS->points[pointSearchInd[j]].x +
@@ -1295,9 +1344,14 @@ public:
                     }
                 }
 
+                // 如果由检索出的5个点拟合的平面是合格的平面，计算点到平面的距离
                 if (planeValid) {
+                    // pd2是点到平面的距离（注意这里pd2是由正负号的）
                     float pd2 = pa * pointSel.x + pb * pointSel.y + pc * pointSel.z + pd;
 
+                    // 与cornerOptimization中类似，使用距离计算一个权重
+                    // keep in mind, 后面部分（0.9*fabs.....）越小越好。因此，这里可以理解为对点到平面距离的加权
+                    // 越远的平面对匹配具有更好的约束性，因此要赋予更大的比重。
                     float s = 1 - 0.9 * fabs(pd2) / sqrt(sqrt(pointSel.x * pointSel.x
                             + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
 
@@ -1306,6 +1360,7 @@ public:
                     coeff.z = s * pc;
                     coeff.intensity = s * pd2;
 
+                    // 如果点到平面的距离够小，则采纳为优化目标点，否则跳过
                     if (s > 0.1) {
                         laserCloudOriSurfVec[i] = pointOri;
                         coeffSelSurfVec[i] = coeff;
@@ -1316,6 +1371,10 @@ public:
         }
     }
 
+    /**
+     * @brief 将cornerOptimization和surfOptimization两个函数计算出来的边缘点、平面点到局部地图的
+     * 距离、法向量集合在一起
+    */
     void combineOptimizationCoeffs()
     {
         // combine corner coeffs
@@ -1337,6 +1396,14 @@ public:
         std::fill(laserCloudOriSurfFlag.begin(), laserCloudOriSurfFlag.end(), false);
     }
 
+    /**
+     * @brief 这部分代码是基于高斯牛顿法的优化，不是LOAM论文里面提到的LM优化。目标函数（点到线、点到平面的距离）对位姿（这里
+     * 使用的是欧拉角、tx,ty,tz的表达）求导，计算高斯-牛顿法更新方向和步长，然后对transformTobeMapped（存放当前雷达点云位姿）进行
+     * 更新。这里相比于LOAM，多了坐标轴的转换，但实际上这部分转换是没有必要的。这部分代码可以直接阅读LeGO-LOAM的代码：
+     * https://github.com/RobustFieldAutonomyLab/LeGO-LOAM/blob/896a7a95a8bc510b76819d4cc48707e344bad621/LeGO-LOAM/src/mapOptmization.cpp#L1229
+     * 
+     * @param iterCount 迭代更新次数，这个函数在scan2MapOptimization中被调用，默认最大迭代次数是30
+    */
     bool LMOptimization(int iterCount)
     {
         // This optimization is from the original loam_velodyne by Ji Zhang, need to cope with coordinate transformation
@@ -1348,6 +1415,7 @@ public:
         // pitch = roll         ---     pitch = yaw
         // yaw = pitch          ---     yaw = roll
 
+        // 计算三轴欧拉角的sin、cos，后面使用旋转矩阵对欧拉角求导中会使用到
         // lidar -> camera
         float srx = sin(transformTobeMapped[1]);
         float crx = cos(transformTobeMapped[1]);
@@ -1356,22 +1424,28 @@ public:
         float srz = sin(transformTobeMapped[0]);
         float crz = cos(transformTobeMapped[0]);
 
+        // laserCloudOri是在cornerOptimization、surfOptimization两个函数中找到的有匹配关系的
+        // 角点和平面点，如果找到的可供优化的点数太少，则跳过此次优化
         int laserCloudSelNum = laserCloudOri->size();
         if (laserCloudSelNum < 50) {
             return false;
         }
 
+        // matA是Jacobians矩阵J
         cv::Mat matA(laserCloudSelNum, 6, CV_32F, cv::Scalar::all(0));
         cv::Mat matAt(6, laserCloudSelNum, CV_32F, cv::Scalar::all(0));
         cv::Mat matAtA(6, 6, CV_32F, cv::Scalar::all(0));
+        // matB是目标函数，也就是距离
         cv::Mat matB(laserCloudSelNum, 1, CV_32F, cv::Scalar::all(0));
         cv::Mat matAtB(6, 1, CV_32F, cv::Scalar::all(0));
+        // matX是高斯-牛顿法计算出的更新向量
         cv::Mat matX(6, 1, CV_32F, cv::Scalar::all(0));
         cv::Mat matP(6, 6, CV_32F, cv::Scalar::all(0));
 
         PointType pointOri, coeff;
 
         for (int i = 0; i < laserCloudSelNum; i++) {
+            // 坐标系转换这部分可以不用看，没有什么作用
             // lidar -> camera
             pointOri.x = laserCloudOri->points[i].y;
             pointOri.y = laserCloudOri->points[i].z;
@@ -1382,39 +1456,75 @@ public:
             coeff.z = coeffSel->points[i].x;
             coeff.intensity = coeffSel->points[i].intensity;
             // in camera
+            // 求雅克比矩阵的值，也就是求目标函数（点到线、平面的距离）相对于tx,ty,tz,rx,ry,rz的导数
+            // 具体的公式推导看仓库README中本项目博客，高斯牛顿法方程：J^{T}J\Delta{x} = -Jf(x)，\Delta{x}就是要求解的更新向量matX
+            // arx是目标函数相对于roll的导数
             float arx = (crx*sry*srz*pointOri.x + crx*crz*sry*pointOri.y - srx*sry*pointOri.z) * coeff.x
                       + (-srx*srz*pointOri.x - crz*srx*pointOri.y - crx*pointOri.z) * coeff.y
                       + (crx*cry*srz*pointOri.x + crx*cry*crz*pointOri.y - cry*srx*pointOri.z) * coeff.z;
-
+            // ary是目标函数相对于pitch的导数
             float ary = ((cry*srx*srz - crz*sry)*pointOri.x 
                       + (sry*srz + cry*crz*srx)*pointOri.y + crx*cry*pointOri.z) * coeff.x
                       + ((-cry*crz - srx*sry*srz)*pointOri.x 
                       + (cry*srz - crz*srx*sry)*pointOri.y - crx*sry*pointOri.z) * coeff.z;
-
+            // arz是目标函数相对于yaw的导数
             float arz = ((crz*srx*sry - cry*srz)*pointOri.x + (-cry*crz-srx*sry*srz)*pointOri.y)*coeff.x
                       + (crx*crz*pointOri.x - crx*srz*pointOri.y) * coeff.y
                       + ((sry*srz + cry*crz*srx)*pointOri.x + (crz*sry-cry*srx*srz)*pointOri.y)*coeff.z;
+
+            /*
+            在求点到直线的距离时，coeff表示的是如下内容
+            [la,lb,lc]表示的是点到直线的垂直连线方向，s是长度
+            coeff.x = s * la;
+            coeff.y = s * lb;
+            coeff.z = s * lc;
+            coeff.intensity = s * ld2;
+
+            在求点到平面的距离时，coeff表示的是
+            [pa,pb,pc]表示过外点的平面的法向量，s是线的长度
+            coeff.x = s * pa;
+            coeff.y = s * pb;
+            coeff.z = s * pc;
+            coeff.intensity = s * pd2;
+            */
+
             // lidar -> camera
             matA.at<float>(i, 0) = arz;
             matA.at<float>(i, 1) = arx;
             matA.at<float>(i, 2) = ary;
+            // 目标函数相对于tx的导数等于法向量的x
             matA.at<float>(i, 3) = coeff.z;
+            // 目标函数相对于ty的导数等于法向量的y
             matA.at<float>(i, 4) = coeff.x;
+            // 目标函数相对于tz的导数等于法向量的z
             matA.at<float>(i, 5) = coeff.y;
+
+            // matB存储的是目标函数（距离）的负值，因为：J^{T}J\Delta{x} = -Jf(x)
             matB.at<float>(i, 0) = -coeff.intensity;
         }
 
         cv::transpose(matA, matAt);
         matAtA = matAt * matA;
         matAtB = matAt * matB;
+        // 求解高斯-牛顿法中的增量方程：J^{T}J\Delta{x} = -Jf(x)，这里解出来的matX就是更新向量
+        // matA是雅克比矩阵J
+        // matAtB是上面等式中等号的右边，负号在matB赋值的时候已经加入
         cv::solve(matAtA, matAtB, matX, cv::DECOMP_QR);
 
+        // 如果是第一次迭代，判断求解出来的近似Hessian矩阵，也就是J^{T}J:=matAtA是否退化
+        /**
+            * 这部分的计算说实话没有找到很好的理论出处，这里只能大概说一下这段代码想要做的事情
+            * 这里用matAtA也就是高斯-牛顿中的近似海瑟（Hessian）矩阵H。求解增量方程：J^{T}J\Delta{x} = -Jf(x)
+            * 要求H:=J^{T}J可逆，但H不一定可逆。下面的代码通过H的特征值判断H是否退化，并将退化的方向清零matV2。而后又根据
+            * matV.inv()*matV2作为更新向量的权重系数，matV是H的特征向量矩阵。
+        */
         if (iterCount == 0) {
 
             cv::Mat matE(1, 6, CV_32F, cv::Scalar::all(0));
             cv::Mat matV(6, 6, CV_32F, cv::Scalar::all(0));
             cv::Mat matV2(6, 6, CV_32F, cv::Scalar::all(0));
 
+            // 对近似Hessian矩阵做特征值分解，matE是特征值，matV是特征向量。opencv的matV中每一行是一个特征向量
             cv::eigen(matAtA, matE, matV);
             matV.copyTo(matV2);
 
@@ -1433,6 +1543,7 @@ public:
             matP = matV.inv() * matV2;
         }
 
+        // 当第一次迭代判断到海瑟矩阵退化，后面会使用计算出来的权重matP对增量matX做加权组合
         if (isDegenerate)
         {
             cv::Mat matX2(6, 1, CV_32F, cv::Scalar::all(0));
@@ -1440,6 +1551,7 @@ public:
             matX = matP * matX2;
         }
 
+        // 将增量matX叠加到变量（位姿）transformTobeMapped中
         transformTobeMapped[0] += matX.at<float>(0, 0);
         transformTobeMapped[1] += matX.at<float>(1, 0);
         transformTobeMapped[2] += matX.at<float>(2, 0);
@@ -1447,15 +1559,18 @@ public:
         transformTobeMapped[4] += matX.at<float>(4, 0);
         transformTobeMapped[5] += matX.at<float>(5, 0);
 
+        // 计算roll、pitch、yaw的迭代步长
         float deltaR = sqrt(
                             pow(pcl::rad2deg(matX.at<float>(0, 0)), 2) +
                             pow(pcl::rad2deg(matX.at<float>(1, 0)), 2) +
                             pow(pcl::rad2deg(matX.at<float>(2, 0)), 2));
+        // 计算tx，ty，tz的迭代步长
         float deltaT = sqrt(
                             pow(matX.at<float>(3, 0) * 100, 2) +
                             pow(matX.at<float>(4, 0) * 100, 2) +
                             pow(matX.at<float>(5, 0) * 100, 2));
 
+        // 如果迭代的步长达到设定阈值，则认为已经收敛
         if (deltaR < 0.05 && deltaT < 0.05) {
             return true; // converged
         }
