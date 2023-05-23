@@ -51,9 +51,15 @@
 
 
 ## 运行环境搭建
+
 本项目提供基于`ROS2-humble`的镜像，并提供脚本可直接在镜像中启动可视化程序
+
 ### 数据
-本项目同时提供转为`rosbag2`格式的数据包，[下载地址]()
+
+本项目同时提供转为`rosbag2`格式的数据包
+链接：https://pan.baidu.com/s/1hhHvn96uEsDYJNss3Z209Q 
+提取码：2478
+
 ```bash
 export DATA_DIR=/path/to/download/ros2bag/dir
 ```
