@@ -679,7 +679,8 @@ public:
         }
 
         // imuPointerFront为找到的IMU去畸变信息的索引
-        // 这里实际执行的应该是else部分的语句
+        // 引起if条件主要是因为可能最后一个IMU的时间戳依然是小于雷达点的时间戳，
+        // 这个时候就直接使用最后一个IMU对应的角度
         if (pointTime > imuTime[imuPointerFront] || imuPointerFront == 0)
         {
             *rotXCur = imuRotX[imuPointerFront];
