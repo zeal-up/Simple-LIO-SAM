@@ -1352,8 +1352,10 @@ public:
                     // 与cornerOptimization中类似，使用距离计算一个权重
                     // keep in mind, 后面部分（0.9*fabs.....）越小越好。因此，这里可以理解为对点到平面距离的加权
                     // 越远的平面对匹配具有更好的约束性，因此要赋予更大的比重。
-                    float s = 1 - 0.9 * fabs(pd2) / sqrt(sqrt(pointSel.x * pointSel.x
-                            + pointSel.y * pointSel.y + pointSel.z * pointSel.z));
+                    // 值得注意的是，pd2的计算是在地图坐标系下计算，而这里权重的分母的计算是使用pointOri，也就是
+                    // 雷达坐标系下的点进行计算
+                    float s = 1 - 0.9 * fabs(pd2) / sqrt(sqrt(pointOri.x * pointOri.x
+                            + pointOri.y * pointOri.y + pointOri.z * pointOri.z));
 
                     coeff.x = s * pa;
                     coeff.y = s * pb;
